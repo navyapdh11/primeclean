@@ -52,6 +52,8 @@ export default function Header() {
     { href: '/services', label: 'Services' },
     { href: '/book', label: 'Book Now' },
     { href: '/photos', label: 'Photos' },
+    { href: '/ai-chat', label: 'AI Chat' },
+    { href: '/aeo-dashboard', label: 'AEO' },
   ];
 
   return (
