@@ -4,47 +4,62 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    // Not configured — show empty state
+  }
 
   if (!supabase) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <h1 className="text-2xl font-bold mb-4">Configuration Required</h1>
-          <p className="text-gray-600">Please set up your Supabase environment variables.</p>
+          <p className="text-gray-600 mb-6">Please set up your Supabase environment variables to use the dashboard.</p>
+          <a href="/" className="btn-primary inline-block">Go Home</a>
         </div>
       </div>
     );
   }
 
-  const { data: { user } } = await supabase.auth.getUser();
+  let user;
+  try {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    user = u;
+  } catch {
+    return redirect('/login');
+  }
 
   if (!user) {
     redirect('/login');
   }
 
-  // Fetch bookings
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('*, services(name)')
-    .eq('user_id', user.id)
-    .order('date', { ascending: true });
+  let bookings: any[] = [];
+  try {
+    const { data } = await supabase
+      .from('bookings')
+      .select('*, services(name)')
+      .eq('user_id', user.id)
+      .order('date', { ascending: true });
+    bookings = data || [];
+  } catch {
+    // DB may not be set up yet — show empty state
+  }
 
   return (
     <>
       <Header />
       <main id="main-content" className="min-h-screen bg-gray-50 py-12">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center mb-8">
-            <div>
-              <h1 className="text-3xl font-bold">Dashboard</h1>
-              <p className="text-gray-600">Welcome back, {user.email}</p>
-            </div>
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold">Dashboard</h1>
+            <p className="text-gray-600">Welcome back, {user.email}</p>
           </div>
 
-          <div className="card mb-8">
+          <div className="card">
             <h2 className="text-xl font-semibold mb-4">Your Bookings</h2>
-            {bookings && bookings.length > 0 ? (
+            {bookings.length > 0 ? (
               <div className="space-y-4">
                 {bookings.map((booking) => (
                   <div key={booking.id} className="border border-gray-200 rounded-lg p-4">

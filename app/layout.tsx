@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   authors: [{ name: 'PrimeClean' }],
   creator: 'PrimeClean',
   publisher: 'PrimeClean',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_URL || 'https://primeclean-orpin.vercel.app'),
+  alternates: { canonical: '/' },
   robots: {
     index: true,
     follow: true,

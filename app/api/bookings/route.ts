@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
+import { bookingSchema } from '@/lib/validation';
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -9,24 +10,22 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-
-    let query = supabase
-      .from('bookings')
-      .select('*, services(*)')
-      .order('date', { ascending: true });
-
-    if (userId) {
-      query = query.eq('user_id', userId);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data, error } = await query;
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*, services(*)')
+      .eq('user_id', user.id)
+      .order('date', { ascending: true });
 
     if (error) throw error;
 
     return NextResponse.json({ bookings: data || [] });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Get bookings error:', error);
     return NextResponse.json({ bookings: [] });
   }
@@ -46,10 +45,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { serviceId, date, time, address } = await req.json();
+    const body = await req.json();
+    const validation = bookingSchema.safeParse(body);
 
-    if (!serviceId || !date || !time) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: validation.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { serviceId, date, time, address } = validation.data;
+
+    const bookingDate = new Date(date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (bookingDate < today) {
+      return NextResponse.json({ error: 'Date must be in the future' }, { status: 400 });
     }
 
     const { data, error } = await supabase
@@ -68,7 +80,7 @@ export async function POST(req: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({ booking: data });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Create booking error:', error);
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
   }

@@ -1,43 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@/lib/supabase-server';
+import { bookingSchema } from '@/lib/validation';
+import { DEFAULT_SERVICES } from '@/lib/constants';
+
+const stripeKey = process.env.STRIPE_SECRET_KEY;
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-
-  if (!supabase) {
-    return NextResponse.json({ error: 'Service not configured' }, { status: 503 });
-  }
-
-  const stripeKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeKey) {
     return NextResponse.json({ error: 'Payment not configured' }, { status: 503 });
   }
 
-  const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' as any });
+  const supabase = await createClient();
+  if (!supabase) {
+    return NextResponse.json({ error: 'Service not configured' }, { status: 503 });
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const body = await req.json();
+    const validation = bookingSchema.safeParse(body);
 
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: validation.error.flatten() },
+        { status: 400 }
+      );
     }
 
-    const { serviceId, date, time, address } = await req.json();
+    const { serviceId, date, time, address } = validation.data;
 
-    if (!serviceId || !date || !time) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // Try DB first, fall back to defaults
+    let service: { name: string; price_cents: number } | null = null;
+
+    try {
+      const { data } = await supabase
+        .from('services')
+        .select('name, price_cents')
+        .eq('id', serviceId)
+        .single();
+      service = data;
+    } catch {
+      // DB might be empty, fall through
     }
-
-    const { data: service } = await supabase
-      .from('services')
-      .select('*')
-      .eq('id', serviceId)
-      .single();
 
     if (!service) {
-      return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+      const fallback = DEFAULT_SERVICES.find((s) => s.id === serviceId);
+      if (!fallback) {
+        return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+      }
+      service = { name: fallback.name, price_cents: fallback.price_cents };
     }
+
+    const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
 
     const session = await stripe.checkout.sessions.create({
       customer_email: user.email,
@@ -61,8 +81,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error: any) {
-    console.error('Stripe checkout error:', error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Stripe checkout error:', message);
     return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
   }
 }

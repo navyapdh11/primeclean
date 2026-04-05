@@ -1,40 +1,47 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { createClient } from '@/lib/supabase-client';
+import { DEFAULT_SERVICES, TIME_SLOTS } from '@/lib/constants';
 
-const defaultServices = [
-  { id: '1', name: 'Standard Clean', price_cents: 9900, duration: '2-3 hours' },
-  { id: '2', name: 'Deep Clean', price_cents: 19900, duration: '4-6 hours' },
-  { id: '3', name: 'Move In/Out Clean', price_cents: 24900, duration: '5-8 hours' },
-  { id: '4', name: 'Office Clean', price_cents: 14900, duration: '3-4 hours' },
-];
-
-const timeSlots = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'];
-
-export default function BookPage() {
+function BookForm() {
   const searchParams = useSearchParams();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<{ email: string } | null>(null);
   const [selectedService, setSelectedService] = useState(searchParams.get('service') || '');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
-  const supabase = createClient();
+  const [error, setError] = useState('');
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const getInitialSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setUser(data.session?.user ?? null);
+    };
+    getInitialSession();
+
+    const { data } = supabase.auth.onAuthStateChange((
+      _event: string,
+      session: { user: { email: string } } | null,
+    ) => {
       setUser(session?.user ?? null);
     });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
 
     try {
       const res = await fetch('/api/create-checkout', {
@@ -45,11 +52,12 @@ export default function BookPage() {
 
       const data = await res.json();
 
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Failed to create checkout session');
 
       window.location.href = data.url;
-    } catch (error: any) {
-      alert(error.message || 'Failed to create booking');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -57,17 +65,13 @@ export default function BookPage() {
 
   if (!user) {
     return (
-      <>
-        <Header />
-        <main className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold mb-4">Sign In Required</h1>
-            <p className="text-gray-600 mb-6">Please sign in to book a cleaning service.</p>
-            <a href="/login" className="btn-primary">Sign In</a>
-          </div>
-        </main>
-        <Footer />
-      </>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="card text-center max-w-md mx-4">
+          <h1 className="text-2xl font-bold mb-4">Sign In Required</h1>
+          <p className="text-gray-600 mb-6">Please sign in to book a cleaning service.</p>
+          <a href="/login?callbackUrl=/book" className="btn-primary">Sign In</a>
+        </div>
+      </div>
     );
   }
 
@@ -79,29 +83,38 @@ export default function BookPage() {
       <main id="main-content" className="min-h-screen bg-gray-50 py-12">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="card">
-            <h1 className="text-3xl font-bold mb-6">Book a Cleaning Service</h1>
+            <h1 className="text-3xl font-bold mb-2">Book a Cleaning Service</h1>
+            <p className="text-gray-600 mb-6">Choose your service, date, and time.</p>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6" role="alert" aria-live="assertive">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-6" noValidate>
               <div>
-                <label className="label">Service *</label>
+                <label htmlFor="service" className="label">Service *</label>
                 <select
+                  id="service"
                   value={selectedService}
                   onChange={(e) => setSelectedService(e.target.value)}
                   className="input"
                   required
                 >
                   <option value="">Select a service</option>
-                  {defaultServices.map((s) => (
+                  {DEFAULT_SERVICES.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} - ${(s.price_cents / 100).toFixed(2)} ({s.duration})
+                      {s.name} — ${(s.price_cents / 100).toFixed(2)} ({s.duration})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="label">Date *</label>
+                <label htmlFor="date" className="label">Date *</label>
                 <input
+                  id="date"
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
@@ -112,33 +125,51 @@ export default function BookPage() {
               </div>
 
               <div>
-                <label className="label">Time *</label>
+                <label htmlFor="time" className="label">Time *</label>
                 <select
+                  id="time"
                   value={time}
                   onChange={(e) => setTime(e.target.value)}
                   className="input"
                   required
                 >
                   <option value="">Select a time</option>
-                  {timeSlots.map((t) => (
+                  {TIME_SLOTS.map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="label">Address</label>
+                <label htmlFor="address" className="label">Address *</label>
                 <textarea
+                  id="address"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter your address for the cleaning service"
+                  placeholder="Enter the address for the cleaning service"
                   className="input"
                   rows={3}
+                  required
+                  maxLength={500}
                 />
               </div>
 
-              <button type="submit" disabled={loading || !selectedService || !date || !time} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
-                {loading ? 'Processing...' : 'Proceed to Payment'}
+              <button
+                type="submit"
+                disabled={loading || !selectedService || !date || !time || !address}
+                className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  'Proceed to Payment'
+                )}
               </button>
             </form>
           </div>
@@ -146,5 +177,19 @@ export default function BookPage() {
       </main>
       <Footer />
     </>
+  );
+}
+
+export default function BookPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-primary-600 border-t-transparent rounded-full" role="status">
+          <span className="sr-only">Loading booking form...</span>
+        </div>
+      </div>
+    }>
+      <BookForm />
+    </Suspense>
   );
 }

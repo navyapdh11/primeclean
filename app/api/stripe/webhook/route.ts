@@ -2,15 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@/lib/supabase-server';
 
-export async function POST(req: NextRequest) {
-  const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const stripeKey = process.env.STRIPE_SECRET_KEY;
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+export async function POST(req: NextRequest) {
   if (!stripeKey || !webhookSecret) {
+    console.warn(
+      '[Stripe Webhook] Missing STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET. Webhook events will be ignored.'
+    );
     return NextResponse.json({ received: true });
   }
 
-  const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' as any });
+  const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
 
   const body = await req.text();
   const signature = req.headers.get('stripe-signature')!;
@@ -19,8 +22,9 @@ export async function POST(req: NextRequest) {
 
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-  } catch (error: any) {
-    console.error('Webhook signature verification failed:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Stripe Webhook] Signature verification failed:', message);
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
@@ -56,12 +60,27 @@ export async function POST(req: NextRequest) {
 
     case 'payment_intent.payment_failed': {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
-      console.error('Payment failed:', paymentIntent.id);
+      console.error('[Stripe Webhook] Payment failed:', paymentIntent.id);
+
+      // Update booking status to failed
+      await supabase
+        .from('bookings')
+        .update({ status: 'payment_failed' })
+        .eq('stripe_session_id', paymentIntent.id);
+      break;
+    }
+
+    case 'charge.refunded': {
+      const charge = event.data.object as Stripe.Charge;
+      await supabase
+        .from('bookings')
+        .update({ status: 'refunded' })
+        .eq('stripe_session_id', charge.payment_intent as string);
       break;
     }
 
     default:
-      console.log(`Unhandled event type: ${event.type}`);
+      console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
   }
 
   return NextResponse.json({ received: true });
