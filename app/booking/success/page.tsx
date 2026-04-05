@@ -64,6 +64,13 @@ function SuccessContent() {
               Book Another
             </Link>
           </div>
+
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <p className="text-sm text-gray-600 mb-3">Want to document the cleaning progress?</p>
+            <Link href="/photos" className="text-primary-600 hover:underline text-sm font-medium">
+              Upload Before Photos →
+            </Link>
+          </div>
         </div>
       </main>
       <Footer />

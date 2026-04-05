@@ -51,6 +51,7 @@ export default function Header() {
   const navLinks = [
     { href: '/services', label: 'Services' },
     { href: '/book', label: 'Book Now' },
+    { href: '/photos', label: 'Photos' },
   ];
 
   return (

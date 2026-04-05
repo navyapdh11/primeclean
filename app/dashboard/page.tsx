@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import PhotoManager from '@/components/PhotoManager';
 
 export default async function DashboardPage() {
   let supabase;
@@ -90,6 +91,12 @@ export default async function DashboardPage() {
                 <a href="/book" className="btn-primary inline-block">Book Your First Clean</a>
               </div>
             )}
+          </div>
+
+          {/* Photos Section */}
+          <div className="card mt-8">
+            <h2 className="text-xl font-semibold mb-4">Photos</h2>
+            <PhotoManager initialPhotos={[]} />
           </div>
         </div>
       </main>
